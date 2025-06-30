@@ -150,10 +150,10 @@ class NHISScraper:
                 el = wait.until(EC.presence_of_element_located((By.XPATH, f'(//*)[{i}]')))
                 _el_tag_name_ = el.tag_name or ''; _el_id_ = el.get_attribute('id') or ''; _el_class_ = el.get_attribute('class') or ''
                 
-                if _el_class_ and _el_tag_name_ and ("button" in _el_tag_name_.lower()) and ("ext" in _el_class_.lower()):
+                if _el_class_ and _el_tag_name_ and ("button" in _el_tag_name_.lower()) and ("next" in _el_class_.lower()):
                     self.__nxtbtn__ = i
                     if self.__verbose__:
-                        print(f'\033[33mNext Button: {i} --> {el}\033[0m')
+                        print(f'\033[1;33mNext Button: {i} --> <tag={_el_tag_name_} | class={_el_class_} | id={_el_id_}>\033[0m')
                 
                 if _el_class_ and 'rgCurrentPage' in _el_class_:
                     try:
@@ -208,6 +208,8 @@ class NHISScraper:
         success = False
         while not success:
             success = self.__do_scrape__()
+        if self.__verbose__ and abs(self.__page_ctr__-self.__curr_page__) > 2:
+            print(f"\033[31m⛔️ Suspicious jump from page {self.__curr_page__} to {self.__page_ctr__}!\033[0m")
         self.__curr_page__ = self.__page_ctr__
     
     def __do_scrape__(self, t = 2):
@@ -245,7 +247,7 @@ class NHISScraper:
                         self.__hashes__.add(row[7])
                     else:
                         continue
-            print(f'✅ Successfully scraped page {self.__page_ctr__}')
+            print(f'\033[1;32m✅ Successfully scraped page {self.__page_ctr__}/\033[1;37m{self.__tot_page_count__}')
         return True
     
     def scrape(self):
@@ -257,7 +259,7 @@ class NHISScraper:
                 print(f"\033[1;33mLast Page = \033[1:34m{self.__last_page__}\033[35m Current page = {self.__curr_page__}\033[36m Total pages = {self.__tot_page_count__}\033[32m\nAttempting to jump to page {self.__last_page__+1}\033[0m")
             
             self.__jump_to_page__(self.__last_page__)
-            
+
             # after jumping there, scrape that page
             # after scraping, advance to the next page and read
             # all while curr != last
