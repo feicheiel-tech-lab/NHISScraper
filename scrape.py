@@ -9,6 +9,15 @@ Created on Sun Jun 29 08:45:02 2025
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (TimeoutException, 
+                                        NoSuchElementException, 
+                                        ElementClickInterceptedException, 
+                                        StaleElementReferenceException, 
+                                        WebDriverException
+)
+
 from bs4 import BeautifulSoup
 import csv
 import time
@@ -19,7 +28,7 @@ import os
 import pandas as pd
 
 class NHISScraper: 
-    def __init__(self, fln = "nhis_payments.csv", verbose=False):
+    def __init__(self, fln = "nhis_payments.csv", verbose=True, t_wait = 17):
         self.__fln__ = fln
         self.__last_page__ = 0
         self.__verbose__ = verbose #set this to show error messages.
@@ -73,8 +82,8 @@ class NHISScraper:
                 t_wait = 5
                 print(f"\033[31mRetrying in {t_wait} seconds due to error: {e} \033[0m")
                 time.sleep(t_wait)
-        #self.__elems__ = []
-        
+
+        self.__t_wait__ = t_wait
         self.__nxtbtn__ = 0
         self.__page_ctr__ = 0
         self.__curr_page__ = 0
@@ -85,14 +94,16 @@ class NHISScraper:
             self.scrape()
         except KeyboardInterrupt:
             print(f'\033[1;31m Scraping interrupted. Gracefully shutting down.\033[0m')
-            if self.page_rows:
+            if len(self.page_rows):
+                print(f"\033[1;36m<Flushing scraped from memory to disk...>\033[0m")
                 with open(self.__fln__, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    for row in self.page_rows:
+
+                    while(len(self.page_rows)):
+                        row = self.page_rows.popleft()
                         if row[7] not in self.__hashes__:
                             writer.writerow(row)
                             self.__hashes__.add(row[7])
-                            self.page_rows.popleft()
                         else:
                             continue
             self.close()
@@ -119,44 +130,71 @@ class NHISScraper:
         return date_str
     
     def getFacilityCategory(self, name):
+        name = name.lower()
         for pattern_, label in self.__category_patterns__.items():
             if re.search(pattern_, name):
                 return label
         return "Unknown"
     
     def __getelems__(self):
-        __el_ctr__ = len(self.__driver__.find_elements(By.XPATH, "//*"))
+        try:
+            __el_ctr__ = len(self.__driver__.find_elements(By.XPATH, "//*"))
+        except Exception as e:
+            if self.__verbose__:
+                print(f'\033[1;31mFailed to count elements')
+            return
+        
         for i in range(1, __el_ctr__+1):
             try:
-                el = self.__driver__.find_element(By.XPATH, f'(//*)[{i}]')
-                _el_tag_name_ = el.tag_name; _el_id_ = el.get_attribute('id'); _el_class_ = el.get_attribute('class')
-                if ("BUTTON" in _el_tag_name_) & ("ext" in _el_class_):
+                wait = WebDriverWait(self.__driver__, self.__t_wait__)
+                el = wait.until(EC.presence_of_element_located((By.XPATH, f'(//*)[{i}]')))
+                _el_tag_name_ = el.tag_name or ''; _el_id_ = el.get_attribute('id') or ''; _el_class_ = el.get_attribute('class') or ''
+                
+                if _el_class_ and _el_tag_name_ and ("button" in _el_tag_name_.lower()) and ("ext" in _el_class_.lower()):
                     self.__nxtbtn__ = i
                     if self.__verbose__:
-                        print(f'Next Button: {i} --> {el}')
-                if 'rgCurrentPage' in _el_class_:
-                    self.__page_ctr__ = int(el.text)
-                    if self.__verbose__:
-                        print(f'\033[1;36mCurrent Page: {self.__page_ctr__}\033[0m')
-                if 'STRONG' in _el_tag_name_:
-                    self.__tot_page_count__ = int(el.text)
+                        print(f'\033[33mNext Button: {i} --> {el}\033[0m')
+                
+                if _el_class_ and 'rgCurrentPage' in _el_class_:
+                    try:
+                        self.__page_ctr__ = int(el.text.strip())
+                        if self.__verbose__:
+                            print(f'\033[1;36mCurrent Page: {self.__page_ctr__}\033[0m')
+                    except ValueError:
+                        if self.__verbose__:
+                            print(f"<\033[1;31mValueError Received for attempting to cast from {el.text} to int>\033[0m")
+                        continue
+                
+                if _el_tag_name_ and 'strong' in _el_tag_name_.lower():
+                    try:
+                        self.__tot_page_count__ = int(el.text.strip())
+                    except ValueError:
+                        if self.__verbose__:
+                            print(f'<\033[1;31mValueError Received for attempting to cast from {el.text} to int>\033[0m')
+                        continue
             except Exception as e: 
                 if self.__verbose__:
-                    print(f'Skipping ahead: {e}')
+                    print(f'\033[1;31mSkipping ahead: {e}\033[0m')
                 continue
     
     def __goto_next_page__(self):
         if self.__nxtbtn__ == 0:
             self.__getelems__()
-        __nxt__ = self.__driver__.find_element(By.XPATH, f'(//*)[{self.__nxtbtn__}]')
+        
         try:
+            wait = WebDriverWait(self.__driver__, self.__t_wait__)
+            __nxt__ = wait.until(EC.presence_of_element_located((By.XPATH, f'(//*)[{self.__nxtbtn__}]')))
+
             self.__driver__.execute_script("arguments[0].scrollIntoView({block: 'center'});", __nxt__)
             self.__driver__.execute_script("arguments[0].click();", __nxt__)
+        except TimeoutException:
+            if self.__verbose__:
+                print("\033[1;31mTimeout: Next button not found on page.\033[0m")
+            return False
         except Exception as e:
             if self.__verbose__:
                 print(f"\033[1;31mClick failed: {e}\033[0m")
             return False
-        time.sleep(5)
         self.__curr_page__ = self.__page_ctr__
         return True
 
@@ -173,7 +211,6 @@ class NHISScraper:
         self.__curr_page__ = self.__page_ctr__
     
     def __do_scrape__(self, t = 2):
-        time.sleep(t)
         soup = BeautifulSoup(self.__driver__.page_source, 'html.parser')
         table = soup.find('table')
 
@@ -200,27 +237,32 @@ class NHISScraper:
         else: 
             with open(self.__fln__, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                for row in self.page_rows:
+                while(len(self.page_rows)):
+                    #for row in self.page_rows:
+                    row = self.page_rows.popleft()
                     if row[7] not in self.__hashes__:
                         writer.writerow(row)
                         self.__hashes__.add(row[7])
-                        self.page_rows.popleft()
                     else:
                         continue
             print(f'✅ Successfully scraped page {self.__page_ctr__}')
         return True
     
-    def scrape(self, t = 3):
+    def scrape(self):
         if self.__last_page__ == 0:
             self.__scrape_curr_page__()
         else:
             # jump to the next page after the last page we read last time
-            self.__jump_to_page__(self.__last_page__+1)
+            if self.__verbose__:
+                print(f"\033[1;33mLast Page = \033[1:34m{self.__last_page__}\033[35m Current page = {self.__curr_page__}\033[36m Total pages = {self.__tot_page_count__}\033[32m\nAttempting to jump to page {self.__last_page__+1}\033[0m")
+            
+            self.__jump_to_page__(self.__last_page__)
+            
             # after jumping there, scrape that page
             # after scraping, advance to the next page and read
             # all while curr != last
-            while (self.__curr_page__ != self.__tot_page_count__):
+            while (self.__curr_page__ < self.__tot_page_count__):
                 self.__scrape_curr_page__()
-                time.sleep(t)
                 self.__goto_next_page__()
-                time.sleep(t+2)
+                if self.__verbose__:
+                    print(f"\033[1;37mSuccessfully added Page \033[31m{self.__curr_page__}")
