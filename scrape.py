@@ -74,6 +74,7 @@ class NHISScraper:
                 print(f"\033[31mRetrying in {t_wait} seconds due to error: {e} \033[0m")
                 time.sleep(t_wait)
         #self.__elems__ = []
+        
         self.__nxtbtn__ = 0
         self.__page_ctr__ = 0
         self.__curr_page__ = 0
@@ -124,9 +125,10 @@ class NHISScraper:
         return "Unknown"
     
     def __getelems__(self):
-        __elems__ = [(i+1, el) for i, el in enumerate(self.__driver__.find_elements(By.XPATH, "//*"))]
-        for i, el in __elems__:
+        __el_ctr__ = len(self.__driver__.find_elements(By.XPATH, "//*"))
+        for i in range(1, __el_ctr__+1):
             try:
+                el = self.__driver__.find_element(By.XPATH, f'(//*)[{i}]')
                 _el_tag_name_ = el.tag_name; _el_id_ = el.get_attribute('id'); _el_class_ = el.get_attribute('class')
                 if ("BUTTON" in _el_tag_name_) & ("ext" in _el_class_):
                     self.__nxtbtn__ = i
